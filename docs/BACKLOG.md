@@ -5,27 +5,38 @@ independently runnable/testable before moving to the next — no phase depends
 on later ones existing.
 
 ## Phase 0 — Project setup
-- [ ] Repo structure per `ARCHITECTURE.md` (`scraper/`, `tracker/`, `app/`, `docs/`)
-- [ ] `pyproject.toml` (deps: `httpx`, `PySide6`, `apscheduler`; dev extras: `pytest`, `ruff`)
-- [ ] SQLite schema drafted: searches, tracked classes, poll history
+- [x] Repo structure per `ARCHITECTURE.md` (`scraper/`, `tracker/`, `app/`, `docs/`)
+- [x] `pyproject.toml` (deps: `httpx`, `PySide6`, `apscheduler`; dev extras: `pytest`, `ruff`)
+- [ ] SQLite schema drafted: tracked classes, poll history
+- [ ] Types: ClassSection Shape
 
 ## Phase 1 — Scraper (client + parser + service)
 - [ ] Capture the real POST requests the Staff Search site sends (form fields,
       headers, session/cookie behavior) — needed before writing the client
+- [ ] Capture the semester `<select>` options (value/label pairs) from the
+      Staff Search form — decides whether `semester` is stored as a raw term
+      code with a computed label, or something else. Held open per
+      `ARCHITECTURE.md` §4a until this real data is in hand.
 - [ ] `client.py`: session handling, retries/backoff
 - [ ] `parser.py`: raw response → `ClassSection` objects
 - [ ] `service.py`: `search_classes(criteria) -> list[ClassSection]`
+      (in-memory only, no persistence — see `ARCHITECTURE.md` §4a)
 - [ ] Validate against real searches by criteria from the README (semester,
       CRN, subject/number, title, professor, credits)
 - **Exit criteria**: can run a search from a throwaway script and get correct
   structured results — no UI or storage needed yet.
 
 ## Phase 2 — Storage
-- [ ] SQLite tables: `tracked_classes`, `poll_history`
-- [ ] `store.py`: add/remove tracked class, record poll result, read latest
-      known status per tracked class
-- **Exit criteria**: scraper results can be persisted and read back without
-  the tracker or UI existing yet.
+- [ ] SQLite tables per `ARCHITECTURE.md` §4a / `SCHEMA.md`:
+      `tracked_classes` (static class info + `untracked_at` for soft
+      delete, `UNIQUE(crn, semester)`) and `poll_history` (seats_available,
+      status, polled_at, FK to tracked class)
+- [ ] `store.py`: add tracked class, soft-delete (untrack) a tracked class,
+      record poll result, read latest known status per tracked class
+      (latest `poll_history` row — not a duplicated column on
+      `tracked_classes`)
+- **Exit criteria**: a tracked class and its poll history can be persisted
+  and read back without the tracker or UI existing yet.
 
 ## Phase 3 — Tracker / poller
 - [ ] Background poll loop (own thread), adaptive interval logic from
