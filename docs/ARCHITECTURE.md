@@ -27,7 +27,9 @@ add/drop period) where seats can go in minutes. Poll adaptively:
 
 - **Scraper**: Python + `requests`/`httpx`. The target site is static
   (plain POST/GET, no JS rendering needed) so no Selenium/Playwright required.
-- **Storage**: SQLite — tracked classes, poll history, last-known status.
+- **Storage**: SQLite — `tracked_classes` (static info + soft-delete flag)
+  and `poll_history` (status over time; latest row per class is the
+  "current status", not a separately stored field).
 - **Interface**: PySide6 (Qt for Python) native desktop app, not a browser
   UI. Cross-platform by default (Windows, Linux, macOS) — same codebase, no
   per-OS UI work needed. The UI calls scraper/tracker service functions
@@ -65,9 +67,41 @@ Three layers, so the tracker never touches HTTP/parsing details:
   Isolated on purpose — this is the part most likely to break if USF changes
   markup, and a break here shouldn't touch the client or the tracker.
 - **Service**: exposes one clean entry point, e.g.
-  `search_classes(criteria) -> list[ClassSection]`. Writes results to
-  SQLite; the tracker reads from SQLite rather than calling the scraper
-  directly, so tracker logic is decoupled from how the data got there.
+  `search_classes(criteria) -> list[ClassSection]`. In-memory only — search
+  results are **not** persisted to SQLite; the UI displays them directly
+  from the returned list.
+
+## 4a. Search → track → poll data flow
+
+- `app/` calls `search_classes(criteria)` and shows the resulting
+  `ClassSection` list in the GUI. Nothing is written to SQLite at this
+  point.
+- When the user clicks "track" on a result, the UI hands that one
+  `ClassSection` to the tracker, which persists it into `tracked_classes`.
+  This is the only point search data gets written to SQLite, and it's the
+  only copy of that class's static info (crn, semester, subject_number,
+  title, professor, credits, date_added) — so `tracked_classes` is
+  deliberately denormalized rather than joined against a search-results
+  cache.
+- The tracker then polls by calling the scraper's `search_classes`
+  directly on its own schedule (adaptive interval, §2) — it is **not**
+  decoupled from the scraper the way earlier drafts of this doc assumed;
+  polling always needs a live request each cycle. SQLite is where poll
+  *results* land, not where the tracker sources data from.
+- Each poll result (seats_available, status, polled_at) is appended to
+  `poll_history`, keyed to the tracked class. `tracked_classes` itself
+  never stores seat/status fields — "current status" for a tracked class
+  is always read as the latest `poll_history` row for it, so there's one
+  source of truth instead of two tables that can drift out of sync.
+- Untracking is a **soft delete**: set `untracked_at` on the
+  `tracked_classes` row rather than deleting it, so `poll_history` for a
+  class the user previously tracked stays intact instead of being orphaned
+  or cascaded away.
+- `semester` representation (raw term code vs. a computed human label) is
+  intentionally undecided — USF's Staff Search form likely exposes exact
+  term codes via its semester `<select>` options, which Phase 1's request
+  capture will surface. Deciding this before that capture risks guessing
+  wrong and silently breaking polling later.
 
 ## 5. Development workflow
 
